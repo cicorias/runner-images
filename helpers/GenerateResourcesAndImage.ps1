@@ -6,6 +6,7 @@ enum ImageType {
     Ubuntu2004 = 3
     Ubuntu2204 = 4
     UbuntuMinimal = 5
+    Ubuntu2204thin = 6
 }
 
 Function Get-PackerTemplatePath {
@@ -31,6 +32,9 @@ Function Get-PackerTemplatePath {
         }
         ([ImageType]::UbuntuMinimal) {
             $relativeTemplatePath = Join-Path "linux" "ubuntuminimal.pkr.hcl"
+        }
+        ([ImageType]::Ubuntu2204thin) {
+            $relativeTemplatePath = Join-Path "linux" "Ubuntu2204thin.pkr.hcl"
         }
         default { throw "Unknown type of image" }
     }
@@ -124,6 +128,7 @@ Function GenerateResourcesAndImage {
         [hashtable] $Tags
     )
 
+    $VerbosePreference = "Continue"
     try {
         $builderScriptPath = Get-PackerTemplatePath -RepositoryRoot $ImageGenerationRepositoryRoot -ImageType $ImageType
         $ServicePrincipalClientSecret = $env:UserName + [System.GUID]::NewGuid().ToString().ToUpper()
@@ -131,13 +136,17 @@ Function GenerateResourcesAndImage {
 
         if ([string]::IsNullOrEmpty($AzureClientId))
         {
-            Connect-AzAccount
+            Write-Verbose "using interactive login"
+            Connect-AzAccount -SubscriptionId $SubscriptionId -Tenant $AzureTenantId
         } else {
+            Write-Verbose "using service principal login"
             $AzSecureSecret = ConvertTo-SecureString $AzureClientSecret -AsPlainText -Force
             $AzureAppCred = New-Object System.Management.Automation.PSCredential($AzureClientId, $AzSecureSecret)
             Connect-AzAccount -ServicePrincipal -Credential $AzureAppCred -Tenant $AzureTenantId
         }
         Set-AzContext -SubscriptionId $SubscriptionId
+
+        Write-Verbose "Set context to subscription $SubscriptionId"
 
         $alreadyExists = $true;
         try {
@@ -179,6 +188,7 @@ Function GenerateResourcesAndImage {
                 }
             }
         } else {
+            Write-Verbose "Creating resource group :::fall-through::: $ResourceGroupName"
             New-AzResourceGroup -Name $ResourceGroupName -Location $AzureLocation -Tag $tags
         }
 
@@ -192,17 +202,20 @@ Function GenerateResourcesAndImage {
         $storageAccountName += "001"
 
 
+        Write-Verbose "Creating storage account $storageAccountName"
         # Storage Account Name can only be 24 characters long
         if ($storageAccountName.Length -gt 24){
             $storageAccountName = $storageAccountName.Substring(0, 24)
         }
 
+        Write-Verbose "Creating storage account $storageAccountName"
         if ($tags) {
             New-AzStorageAccount -ResourceGroupName $ResourceGroupName -AccountName $storageAccountName -Location $AzureLocation -SkuName "Standard_LRS" -AllowBlobPublicAccess $AllowBlobPublicAccess -EnableHttpsTrafficOnly $EnableHttpsTrafficOnly -Tag $tags
         } else {
             New-AzStorageAccount -ResourceGroupName $ResourceGroupName -AccountName $storageAccountName -Location $AzureLocation -SkuName "Standard_LRS" -AllowBlobPublicAccess $AllowBlobPublicAccess -EnableHttpsTrafficOnly $EnableHttpsTrafficOnly
         }
 
+        Write-Verbose "Creating storage container 'packer'"
         if ([string]::IsNullOrEmpty($AzureClientId)) {
             # Interactive authentication: A service principal is created during runtime.
             $spDisplayName = [System.GUID]::NewGuid().ToString().ToUpper()
@@ -257,6 +270,7 @@ Function GenerateResourcesAndImage {
 
         Get-LatestCommit -ErrorAction SilentlyContinue
 
+        Write-Verbose "Starting packer build for $builderScriptPath"
         $packerBinary = Get-Command "packer"
         if (-not ($packerBinary)) {
             throw "'packer' binary is not found on PATH"
@@ -278,6 +292,7 @@ Function GenerateResourcesAndImage {
             }
         }
 
+        Write-Verbose "Using builder script: $builderScriptPath"
         if ($builderScriptPath.Contains(".json")) {
             if ($Tags) {
                 $builderScriptPath_temp = $builderScriptPath.Replace(".json", "-temp.json")
@@ -288,6 +303,7 @@ Function GenerateResourcesAndImage {
             }
         }
 
+        write-Verbose "Launching packer build for $builderScriptPath for binary $packerBinary"
         & $packerBinary build -on-error="$($OnError)" `
             -var "client_id=$($spClientId)" `
             -var "client_secret=$($ServicePrincipalClientSecret)" `
@@ -302,6 +318,7 @@ Function GenerateResourcesAndImage {
             $builderScriptPath
     }
     catch {
+        Write-Verbose "Caught exception: $_"
         Write-Error $_
     }
     finally {
