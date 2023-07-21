@@ -317,7 +317,6 @@ build {
                         "${path.root}/scripts/installers/terraform.sh",
                         "${path.root}/scripts/installers/vcpkg.sh",
                         "${path.root}/scripts/installers/dpkg-config.sh",
-                        "${path.root}/scripts/installers/android.sh",
                         "${path.root}/scripts/installers/pypy.sh",
                         "${path.root}/scripts/installers/python.sh",
                         "${path.root}/scripts/installers/zstd.sh"
